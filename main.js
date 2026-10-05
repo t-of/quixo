@@ -84,7 +84,7 @@ function goTitle() {
 function newGame(mode, cpuSide) {
   animating = false;
   animGen++;
-  camera.position.set(0, 7.2, 6.7); // タイトルで回った視点を戻す
+  camera.position.set(0, 7.2, 6.7); // 前の対局で回した視点を戻す
   controls.update();
   G = { mode, cpuSide, cells: Array(25).fill(0), turn: 1, selected: null, winner: null, winLine: null, history: new Map() };
   render();
@@ -180,7 +180,6 @@ controls.minDistance = 5;
 controls.maxDistance = 16;
 controls.maxPolarAngle = Math.PI / 2 - 0.05; // 盤の下にはもぐらない
 controls.target.set(0, 0.3, 0);
-controls.autoRotateSpeed = 0.8;
 controls.update();
 controls.addEventListener('change', draw);
 
@@ -227,6 +226,8 @@ const board = new THREE.Mesh(new RoundedBoxGeometry(5.8, 0.36, 5.8, 4, 0.14), wo
 board.position.y = -0.18;
 scene.add(board);
 
+const DESK = new THREE.Group(); // 机の天板と盤の影。ホームでは消す
+scene.add(DESK);
 // ---- 机の天板。盤の下に木の板を敷き、地平線まで続ける ----
 {
   const box = new THREE.Box3().setFromObject(board);
@@ -263,7 +264,7 @@ scene.add(board);
   table.rotation.x = -Math.PI / 2;
   table.position.y = box.min.y - 0.01;
   table.renderOrder = -1;
-  scene.add(table);
+  DESK.add(table);
   // 盤の落とす影
   const sc = document.createElement('canvas');
   sc.width = sc.height = 256;
@@ -275,7 +276,7 @@ scene.add(board);
     new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(sc), transparent: true, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = box.min.y - 0.005;
-  scene.add(shadow);
+  DESK.add(shadow);
 }
 
 // 25 マスの位置（spacing=1、中心が原点）
@@ -361,8 +362,7 @@ function loop() {
   raf = 0;
   const V = view();
   const t = performance.now();
-  if (!G) controls.update(); // タイトルではゆっくり回し続ける
-  let moving = !G || liftCell != null || !!V.winLine;
+  let moving = liftCell != null || !!V.winLine;
   cubeMeshes.forEach((m, i) => {
     const y = cubeTargetY(i, t);
     m.position.y += (y - m.position.y) * (V.winLine ? 1 : 0.22);
@@ -444,7 +444,9 @@ function animatePush(chain, prevCells, mark, done) {
 
 function syncScene() {
   const V = view();
-  controls.autoRotate = !G;
+  // タイトルでは盤を斜め上からの向きで止め、机を消して宙に浮かべる
+  DESK.visible = controls.enabled = !!G;
+  if (!G) { camera.position.set(0, 7.2, 6.7); controls.update(); }
   const candidates = V.selected != null ? new Set(MOVES[V.selected].map((m) => m.chain[0])) : null;
   cubeMeshes.forEach((m, i) => { m.rotation.x = TILT[V.cells[i]]; });
   liftCell = animating ? null : V.selected;
