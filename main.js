@@ -281,7 +281,7 @@ const CUBE_MAT = [FACE_MAT[0], FACE_MAT[0], FACE_MAT[1], FACE_MAT[2], FACE_MAT[0
 // どの面を上に向けるか（x 軸まわりの回転）: 無地＝横に倒す / ○＝そのまま / ×＝逆さ
 const TILT = [Math.PI / 2, 0, Math.PI];
 
-const CUBE_SIZE = 0.72;
+const CUBE_SIZE = 1; // マスの間隔（1）と同じにして、隣どうしをすき間なく並べる
 const CUBE_GEO = new RoundedBoxGeometry(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE, 3, 0.06);
 const cubeMeshes = cellPos.map((p, i) => {
   const m = new THREE.Mesh(CUBE_GEO, CUBE_MAT);
