@@ -344,6 +344,69 @@ function render() {
   bindGame();
 }
 
+// ---- ルール欄の図（インライン SVG。ゲーム本体と同じ色: ○=朱 #b3261e、×=焦げ茶 #2a1c12） ----
+const DIAG_CELL = 34, DIAG_GAP = 2, DIAG_PAD = 4;
+const DIAG_FILL = '#d8b887', DIAG_FILL_HI = '#f0d9ab';
+function diagXY(i) { const r = Math.floor(i / 5), c = i % 5; return [DIAG_PAD + c * (DIAG_CELL + DIAG_GAP), DIAG_PAD + r * (DIAG_CELL + DIAG_GAP)]; }
+function diagMark(cx, cy, v) {
+  if (v === 1) return `<circle cx="${cx}" cy="${cy}" r="10" fill="none" stroke="#b3261e" stroke-width="3.5"/>`;
+  if (v === 2) { const d = 7; return `<path d="M${cx - d} ${cy - d} L${cx + d} ${cy + d} M${cx + d} ${cy - d} L${cx - d} ${cy + d}" stroke="#2a1c12" stroke-width="3.5" stroke-linecap="round"/>`; }
+  return '';
+}
+// cells: 長さ25の配列（0=無地 1=○ 2=×）。opts.hi: 薄く強調するマスの番号。opts.badge: {i, ok} で ✓/✕ の小さな印。opts.line: 強調する並び（番号の配列）
+function diagBoard(cells, opts = {}) {
+  const side = DIAG_PAD * 2 + 5 * DIAG_CELL + 4 * DIAG_GAP;
+  let rects = '', marks = '', badges = '';
+  for (let i = 0; i < 25; i++) {
+    const [x, y] = diagXY(i);
+    rects += `<rect x="${x}" y="${y}" width="${DIAG_CELL}" height="${DIAG_CELL}" rx="4" fill="${(opts.hi || []).includes(i) ? DIAG_FILL_HI : DIAG_FILL}"/>`;
+    marks += diagMark(x + DIAG_CELL / 2, y + DIAG_CELL / 2, cells[i]);
+  }
+  (opts.badge || []).forEach(({ i, ok }) => {
+    const [x, y] = diagXY(i);
+    const bx = x + DIAG_CELL - 3, by = y + 3;
+    badges += `<circle cx="${bx}" cy="${by}" r="7" fill="${ok ? '#3a8f4a' : '#8a2f22'}"/>`;
+    badges += ok
+      ? `<path d="M${bx - 3.2} ${by} l2.2 2.4 l4.2 -5" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`
+      : `<path d="M${bx - 2.6} ${by - 2.6} L${bx + 2.6} ${by + 2.6} M${bx + 2.6} ${by - 2.6} L${bx - 2.6} ${by + 2.6}" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>`;
+  });
+  let line = '';
+  if (opts.line) {
+    const pts = opts.line.map((i) => { const [x, y] = diagXY(i); return `${x + DIAG_CELL / 2},${y + DIAG_CELL / 2}`; }).join(' ');
+    line = `<polyline points="${pts}" fill="none" stroke="${opts.lineColor || 'var(--accent)'}" stroke-width="3" stroke-linecap="round" opacity="0.85"/>`;
+  }
+  return `<svg class="diagram" viewBox="0 0 ${side} ${side}" width="${side}" height="${side}">${rects}${line}${marks}${badges}</svg>`;
+}
+// 1 行だけの図（押し込みの前後に使う。幅は盤と揃える）
+function diagRow(vals) {
+  const side = DIAG_PAD * 2 + 5 * DIAG_CELL + 4 * DIAG_GAP;
+  let rects = '', marks = '';
+  vals.forEach((v, c) => {
+    const x = DIAG_PAD + c * (DIAG_CELL + DIAG_GAP), y = DIAG_PAD;
+    rects += `<rect x="${x}" y="${y}" width="${DIAG_CELL}" height="${DIAG_CELL}" rx="4" fill="${DIAG_FILL}"/>`;
+    marks += diagMark(x + DIAG_CELL / 2, y + DIAG_CELL / 2, v);
+  });
+  const h = DIAG_PAD * 2 + DIAG_CELL;
+  return `<svg class="diagram diagram--row" viewBox="0 0 ${side} ${h}" width="${side}" height="${h}">${rects}${marks}</svg>`;
+}
+function emptyCells() { return new Array(25).fill(0); }
+
+const DIAG_INIT = diagBoard(emptyCells(), { hi: BORDER });
+const DIAG_TAKE = diagBoard(
+  (() => { const c = emptyCells(); c[0] = 1; c[4] = 2; c[2] = 2; return c; })(),
+  { badge: [{ i: 0, ok: true }, { i: 1, ok: true }, { i: 2, ok: false }, { i: 4, ok: false }] },
+);
+const DIAG_PUSH_BEFORE = diagRow([1, 0, 2, 0, 0]);
+const DIAG_PUSH_AFTER = diagRow([0, 2, 0, 0, 1]);
+const DIAG_WIN = diagBoard(
+  (() => { const c = emptyCells(); [0, 6, 12, 18, 24].forEach((i) => { c[i] = 1; }); return c; })(),
+  { line: [0, 6, 12, 18, 24] },
+);
+const DIAG_LOSE = diagBoard(
+  (() => { const c = emptyCells(); [20, 21, 22, 23, 24].forEach((i) => { c[i] = 2; }); c[0] = 1; c[6] = 1; c[12] = 1; return c; })(),
+  { line: [20, 21, 22, 23, 24], lineColor: '#e05a3a' },
+);
+
 function titleHTML() {
   return `
     <div class="title">
@@ -355,11 +418,11 @@ function titleHTML() {
       <details class="rules">
         <summary>ルール</summary>
         <ol>
-          <li>5×5 の盤に 25 個のキューブ。はじめは全部無地。先手が ○、後手が ×。</li>
-          <li>自分の番に、外周のキューブを 1 個取る。取れるのは無地か自分の印のものだけ（相手の印は取れない）。</li>
-          <li>取ったキューブを自分の印にして、同じ行か列の端から押し込む。間のキューブが 1 個ずつずれる。取った場所と同じ端からは入れられない。</li>
-          <li>縦・横・斜めのどれかに自分の印が 5 つ並んだら勝ち。</li>
-          <li>押し込んで相手の印が 5 つ並んだら、自分の印も同時に並んでいても負け。</li>
+          <li>5×5 の盤に 25 個のキューブ。はじめは全部無地。先手が ○、後手が ×。${DIAG_INIT}</li>
+          <li>自分の番に、外周のキューブを 1 個取る。取れるのは無地か自分の印のものだけ（相手の印は取れない）。${DIAG_TAKE}</li>
+          <li>取ったキューブを自分の印にして、同じ行か列の端から押し込む。間のキューブが 1 個ずつずれる。取った場所と同じ端からは入れられない。${DIAG_PUSH_BEFORE}<div class="diagram-arrow">↓</div>${DIAG_PUSH_AFTER}</li>
+          <li>縦・横・斜めのどれかに自分の印が 5 つ並んだら勝ち。${DIAG_WIN}</li>
+          <li>押し込んで相手の印が 5 つ並んだら、自分の印も同時に並んでいても負け。${DIAG_LOSE}</li>
           <li>同じ盤面が 3 回出たら引き分け。</li>
         </ol>
       </details>

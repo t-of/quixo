@@ -72,3 +72,6 @@ button { font: inherit; color: inherit; }
 .rules { width: 100%; font-size: 13px; color: var(--muted); }
 .rules summary { cursor: pointer; text-align: center; color: var(--fg); }
 .rules ol { margin: 8px 0 0; padding-left: 1.4em; line-height: 1.6; }
+.rules li { margin-bottom: 10px; }
+.diagram { display: block; width: 100%; max-width: 220px; height: auto; margin: 6px auto 0; }
+.diagram-arrow { text-align: center; color: var(--muted); font-size: 16px; line-height: 1.2; }
