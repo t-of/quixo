@@ -352,6 +352,17 @@ function titleHTML() {
       <button class="pill pill--big" data-start="cpu" data-side="2">CPU と対戦（先手）</button>
       <button class="pill pill--big" data-start="cpu" data-side="1">CPU と対戦（後手）</button>
       <button class="pill pill--big" data-start="2p">2人で対戦（1台で交互）</button>
+      <details class="rules">
+        <summary>ルール</summary>
+        <ol>
+          <li>5×5 の盤に 25 個のキューブ。はじめは全部無地。先手が ○、後手が ×。</li>
+          <li>自分の番に、外周のキューブを 1 個取る。取れるのは無地か自分の印のものだけ（相手の印は取れない）。</li>
+          <li>取ったキューブを自分の印にして、同じ行か列の端から押し込む。間のキューブが 1 個ずつずれる。取った場所と同じ端からは入れられない。</li>
+          <li>縦・横・斜めのどれかに自分の印が 5 つ並んだら勝ち。</li>
+          <li>押し込んで相手の印が 5 つ並んだら、自分の印も同時に並んでいても負け。</li>
+          <li>同じ盤面が 3 回出たら引き分け。</li>
+        </ol>
+      </details>
     </div>`;
 }
 function bindTitle() {
