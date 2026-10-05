@@ -43,6 +43,8 @@ button { font: inherit; color: inherit; }
 }
 .stage {
   flex: 1;
+  min-height: 0;                /* 盤の canvas の大きさで画面が縦に伸びないように */
+  overflow-y: auto;             /* タイトルでルールを開いたときだけスクロール */
   display: grid;
   place-items: center;
   touch-action: manipulation;   /* ダブルタップ拡大を止める */
@@ -64,12 +66,12 @@ button { font: inherit; color: inherit; }
 
 .status { margin: 0; font-size: 14px; min-height: 1.4em; text-align: center; }
 
-.board3d { width: 100%; flex: 1; min-height: 200px; }
+.board3d { position: relative; width: 100%; flex: 1; min-height: 200px; }
 /* タイトルでは対局と同じ盤を飾りとして回す */
 .board3d--title { flex: none; height: clamp(150px, 30dvh, 260px); min-height: 0; }
 .game__top { display: flex; align-items: center; gap: 8px; width: 100%; }
 .game__top .status { flex: 1; }
-.board3d__canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.board3d__canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
 
 .result { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: 4px; }
 
