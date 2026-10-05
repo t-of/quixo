@@ -260,7 +260,7 @@ const socketMeshes = cellPos.map((p, i) => {
   return s;
 });
 
-// キューブの上面に印を描いた板目テクスチャ（無地 / ○ / ×）
+// キューブの面に印を描いた板目テクスチャ（無地 / ○ / ×）
 function markCanvas(mark) {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
@@ -275,21 +275,25 @@ function markCanvas(mark) {
   }
   return c;
 }
-const TOP_MAT = [0, 1, 2].map((m) => wood(0xd8b887, { map: texFrom(markCanvas(m)), clearcoat: 0.5 }));
-const SIDE_MAT = wood(0xb08a52, { clearcoat: 0.3 });
-const CUBE_MATS = [0, 1, 2].map((m) => [SIDE_MAT, SIDE_MAT, TOP_MAT[m], SIDE_MAT, SIDE_MAT, SIDE_MAT]); // BoxGeometry の面順: +x -x +y -y +z -z
+// 実物と同じく、1 個のキューブに ○ と × が向かい合わせに 1 面ずつ、残り 4 面は無地
+const FACE_MAT = [0, 1, 2].map((m) => wood(0xd8b887, { map: texFrom(markCanvas(m)), clearcoat: 0.5 }));
+const CUBE_MAT = [FACE_MAT[0], FACE_MAT[0], FACE_MAT[1], FACE_MAT[2], FACE_MAT[0], FACE_MAT[0]]; // BoxGeometry の面順: +x -x +y -y +z -z
+// どの面を上に向けるか（x 軸まわりの回転）: 無地＝横に倒す / ○＝そのまま / ×＝逆さ
+const TILT = [Math.PI / 2, 0, Math.PI];
 
-const CUBE_GEO = new RoundedBoxGeometry(0.72, 0.5, 0.72, 3, 0.06);
+const CUBE_SIZE = 0.72;
+const CUBE_GEO = new RoundedBoxGeometry(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE, 3, 0.06);
 const cubeMeshes = cellPos.map((p, i) => {
-  const m = new THREE.Mesh(CUBE_GEO, CUBE_MATS[0]);
-  m.position.set(p.x, 0.25, p.z);
+  const m = new THREE.Mesh(CUBE_GEO, CUBE_MAT);
+  m.rotation.x = TILT[0];
+  m.position.set(p.x, CUBE_SIZE / 2, p.z);
   m.userData.cell = i;
   scene.add(m);
   return m;
 });
 
 // 選んだキューブは浮かせてゆらす。勝った並びは波のように跳ねる。動いている間だけ毎フレーム描く
-const BASE_Y = 0.25;
+const BASE_Y = CUBE_SIZE / 2;
 let liftCell = null;
 let winAt = 0;
 let raf = 0;
@@ -299,7 +303,7 @@ function cubeTargetY(i, t) {
     const k = V.winLine.indexOf(i);
     return BASE_Y + 0.35 * Math.max(0, Math.sin((t - winAt) / 160 - k * 0.6));
   }
-  if (i === liftCell) return 0.75 + 0.05 * Math.sin(t / 220);
+  if (i === liftCell) return BASE_Y + 0.5 + 0.05 * Math.sin(t / 220);
   return BASE_Y;
 }
 function loop() {
@@ -323,7 +327,7 @@ const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) 
 const easeOutBack = (t) => 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 2);
 
 // 押し込みアニメーション:
-// 1) 取ったキューブを持ち上げ、ひっくり返しながら入れる端の外まで運ぶ（裏返った瞬間に自分の印に変わる）
+// 1) 取ったキューブを持ち上げ、入れる端の外まで運ぶ。無地なら 90° 倒して自分の印を上に向ける
 // 2) 鎖に沿って全部を 1 マスずつずらす（少し行き過ぎて戻る）
 // 途中で animGen が変わったら（ホームに戻った・やり直した）、片付けて done を呼ばずに止める
 let animGen = 0;
@@ -335,17 +339,19 @@ function animatePush(chain, prevCells, mark, done) {
   const entryFrom = cellPos[chain[0]].clone().addScaledVector(dir, 1);
   entryFrom.y = BASE_Y;
 
-  const flyer = new THREE.Mesh(CUBE_GEO, CUBE_MATS[prevCells[pick]]);
+  const flyer = new THREE.Mesh(CUBE_GEO, CUBE_MAT);
+  const tiltFrom = TILT[prevCells[pick]], tiltTo = TILT[mark];
+  flyer.rotation.x = tiltFrom;
   const start = cubeMeshes[pick].position.clone();
   flyer.position.copy(start);
   scene.add(flyer);
   cubeMeshes[pick].visible = false;
-  const travel = entryFrom.clone().sub(start); travel.y = 0;
-  const axis = new THREE.Vector3(0, 1, 0).cross(travel).normalize();
 
   const movers = [];
   for (let k = 1; k < L; k++) {
-    movers.push({ mesh: new THREE.Mesh(CUBE_GEO, CUBE_MATS[prevCells[chain[k - 1]]]), from: cellPos[chain[k - 1]], to: cellPos[chain[k]] });
+    const mesh = new THREE.Mesh(CUBE_GEO, CUBE_MAT);
+    mesh.rotation.x = TILT[prevCells[chain[k - 1]]];
+    movers.push({ mesh, from: cellPos[chain[k - 1]], to: cellPos[chain[k]] });
   }
 
   const FLY = 560, PUSH = 320;
@@ -363,16 +369,14 @@ function animatePush(chain, prevCells, mark, done) {
       const t = el / FLY, e = easeInOut(t);
       flyer.position.lerpVectors(start, entryFrom, e);
       flyer.position.y = start.y + (BASE_Y - start.y) * e + 1.3 * Math.sin(Math.PI * e);
-      flyer.quaternion.setFromAxisAngle(axis, 2 * Math.PI * e);
-      if (e > 0.5) flyer.material = CUBE_MATS[mark];
+      flyer.rotation.x = tiltFrom + (tiltTo - tiltFrom) * e;
       draw();
       requestAnimationFrame(step);
       return;
     }
     if (!pushing) {
       pushing = true;
-      flyer.quaternion.identity();
-      flyer.material = CUBE_MATS[mark];
+      flyer.rotation.x = tiltTo;
       movers.push({ mesh: flyer, from: entryFrom, to: cellPos[chain[0]] });
       movers.forEach((mv) => { if (mv.mesh !== flyer) scene.add(mv.mesh); });
       chain.forEach((i) => { cubeMeshes[i].visible = false; });
@@ -391,7 +395,7 @@ function syncScene() {
   const V = view();
   controls.autoRotate = !G;
   const candidates = V.selected != null ? new Set(MOVES[V.selected].map((m) => m.chain[0])) : null;
-  cubeMeshes.forEach((m, i) => { m.material = CUBE_MATS[V.cells[i]]; });
+  cubeMeshes.forEach((m, i) => { m.rotation.x = TILT[V.cells[i]]; });
   liftCell = animating ? null : V.selected;
   if (V.winLine && !winAt) winAt = performance.now();
   if (!V.winLine) winAt = 0;
