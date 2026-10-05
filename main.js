@@ -82,7 +82,7 @@ function playerLabel(p) {
 }
 
 // 押し込みを決めたら、まず 3D アニメーションで見せてから盤面を確定する
-function doMove(pick, mv, after) {
+function doMove(pick, mv) {
   animating = true;
   G.selected = null;
   render();
@@ -106,7 +106,6 @@ function doMove(pick, mv, after) {
     }
     render();
     maybeCpuTurn();
-    if (after) after();
   });
 }
 
@@ -327,29 +326,18 @@ canvas.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY];
 canvas.addEventListener('pointerup', (e) => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) return;
   downAt = null;
-  if (!G || animating) return;
-  if (G.mode === 'tutorial') { if (TUT.locked) return; } else if (G.winner || isCpuTurn()) return;
+  if (!G || G.winner || isCpuTurn() || animating) return;
   const r = canvas.getBoundingClientRect();
   const ray = new THREE.Raycaster();
   ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
   const hit = ray.intersectObjects([...cubeMeshes, ...socketMeshes], true)[0];
-  if (!hit) return;
-  if (G.mode === 'tutorial') tutorialClick(hit.object.userData.cell);
-  else clickCell(hit.object.userData.cell);
+  if (hit) clickCell(hit.object.userData.cell);
 });
 
 // ---- 画面 ----
 function render() {
   const stage = document.getElementById('stage');
-  if (TUT && TUT.done) { stage.innerHTML = tutorialEndHTML(); bindTutorialEnd(); return; }
   if (!G) { stage.innerHTML = titleHTML(); bindTitle(); return; }
-  if (G.mode === 'tutorial') {
-    stage.innerHTML = tutorialHTML();
-    document.getElementById('board3d').appendChild(canvas);
-    syncScene();
-    bindTutorial();
-    return;
-  }
   stage.innerHTML = gameHTML();
   document.getElementById('board3d').appendChild(canvas);
   syncScene();
@@ -427,7 +415,6 @@ function titleHTML() {
       <button class="pill pill--big" data-start="cpu" data-side="2">CPU と対戦（先手）</button>
       <button class="pill pill--big" data-start="cpu" data-side="1">CPU と対戦（後手）</button>
       <button class="pill pill--big" data-start="2p">2人で対戦（1台で交互）</button>
-      <button class="pill" data-tutorial>チュートリアル</button>
       <details class="rules">
         <summary>ルール</summary>
         <ol>
@@ -443,8 +430,6 @@ function titleHTML() {
 }
 function bindTitle() {
   document.querySelectorAll('[data-start]').forEach((b) => b.addEventListener('click', () => newGame(b.dataset.start, Number(b.dataset.side) || null)));
-  const tut = document.querySelector('[data-tutorial]');
-  if (tut) tut.addEventListener('click', tutorialStart);
 }
 
 function gameHTML() {
@@ -475,109 +460,6 @@ function bindGame() {
   if (again) again.addEventListener('click', () => newGame(G.mode, G.cpuSide));
   const title = document.querySelector('[data-title]');
   if (title) title.addEventListener('click', () => { G = null; render(); });
-}
-
-// ---- チュートリアル: 決め打ちの盤面を段階ごとに置き、実際の盤を触らせて覚えさせる ----
-// 対局の勝敗判定（doMove）はそのまま使うが、G.mode='tutorial' の間は CPU は動かず、
-// 結果が段階の狙いと違えば盤を同じ段階に戻してヒントを出す（勝敗・保存データには触らない）。
-function tCells(marks) { const c = emptyCells(); marks.forEach(([i, m]) => { c[i] = m; }); return c; }
-
-const TUT_STEPS = [
-  { // 1-2: 外周を取って押し込む
-    cells: emptyCells(),
-    pick: '外周のキューブをタップして取ろう。無地ならどこでもいいよ。ふちの内側のマスは取れないよ。',
-    push: '光っている端をタップして押し込もう。',
-  },
-  { // 3: 相手の印（×）は取れない
-    cells: tCells([[IDX(2, 0), 2]]),
-    pick: '左側中ほどの×をタップしてみよう。',
-    push: '光っている端をタップして押し込もう。',
-    blockedHint: '相手の印（×）は取れないよ。無地か自分の印（○）を選んでね。',
-  },
-  { // 4: 勝つ手を指す
-    cells: tCells([[IDX(0, 1), 1], [IDX(1, 1), 1], [IDX(2, 1), 1], [IDX(3, 1), 1]]),
-    pick: 'あと1手で○が5つ並ぶよ。左から2列目の下のマスを取ろう。',
-    push: '上の端から押し込んで5つ並べよう。',
-    win: 1,
-    wrongHint: 'それじゃ5つ並ばないよ。もういちど挑戦しよう。',
-  },
-  { // 5: 押し込みで相手の列ができる手を避ける
-    cells: tCells([[IDX(1, 0), 2], [IDX(1, 1), 2], [IDX(1, 3), 2], [IDX(1, 4), 2], [IDX(2, 2), 2]]),
-    pick: '上側中央のマスを取ろう。',
-    push: '下の端から押し込むと×が5つ並んでしまうよ。左右どちらかの端を選ぼう。',
-    avoidLoss: true,
-    wrongHint: 'それだと×が5つ並んで負けてしまうよ。別の向きで押し込んでみよう。',
-  },
-];
-
-let TUT = null; // { step, phase: 'pick'|'push', hint, locked, done }
-
-function tutorialStart() { tutorialGoto(0); }
-function tutorialRetry() { tutorialGoto(TUT.step); }
-function tutorialGoto(step) {
-  if (step >= TUT_STEPS.length) { TUT = { step, done: true }; G = null; render(); return; }
-  G = { mode: 'tutorial', cpuSide: null, cells: TUT_STEPS[step].cells.slice(), turn: 1, selected: null, winner: null, winLine: null, history: new Map() };
-  TUT = { step, phase: 'pick', hint: null, locked: false };
-  render();
-}
-function tutorialFail(hint) {
-  TUT.locked = true;
-  TUT.hint = hint;
-  render();
-  setTimeout(() => tutorialRetry(), 1100);
-}
-function tutorialClick(i) {
-  if (!G || TUT.locked || animating) return;
-  const def = TUT_STEPS[TUT.step];
-  if (G.selected == null) {
-    if (!BORDER.includes(i)) { TUT.hint = 'ふちの外周（16マス）をタップしてね。'; render(); return; }
-    if (G.cells[i] !== 0 && G.cells[i] !== G.turn) { TUT.hint = def.blockedHint || '相手の印（×）は取れないよ。無地か自分の印（○）を選んでね。'; render(); return; }
-    G.selected = i; TUT.phase = 'push'; TUT.hint = null; render();
-    return;
-  }
-  if (G.selected === i) { G.selected = null; TUT.phase = 'pick'; render(); return; }
-  const mv = MOVES[G.selected].find((m) => m.chain[0] === i);
-  if (!mv) {
-    if (BORDER.includes(i) && (G.cells[i] === 0 || G.cells[i] === G.turn)) { G.selected = i; render(); return; }
-    TUT.hint = '光っている端をタップしてね。';
-    render();
-    return;
-  }
-  doMove(G.selected, mv, () => {
-    if (def.win && G.winner !== def.win) { tutorialFail(def.wrongHint); return; }
-    if (def.avoidLoss && G.winner === 2) { tutorialFail(def.wrongHint); return; }
-    tutorialGoto(TUT.step + 1);
-  });
-}
-
-function tutorialHTML() {
-  const def = TUT_STEPS[TUT.step];
-  const status = TUT.hint || def[TUT.phase] || def.pick;
-  return `
-    <div class="game">
-      <p class="status">チュートリアル ${TUT.step + 1}/${TUT_STEPS.length}</p>
-      <div class="board3d" id="board3d"></div>
-      <p class="hint">${status}</p>
-      <div class="result"><button class="pill" data-tut-quit>やめる</button></div>
-    </div>`;
-}
-function bindTutorial() {
-  document.querySelector('[data-tut-quit]').addEventListener('click', () => { TUT = null; G = null; render(); });
-}
-
-function tutorialEndHTML() {
-  return `
-    <div class="title">
-      <h2>おつかれさま！</h2>
-      <p class="hint">これでルールはばっちり。CPU と対戦してみよう。</p>
-      <button class="pill pill--big" data-start="cpu" data-side="2">CPU と対戦する</button>
-      <button class="pill" data-tut-quit>タイトルへ</button>
-    </div>`;
-}
-function bindTutorialEnd() {
-  const start = document.querySelector('[data-start]');
-  if (start) start.addEventListener('click', () => { TUT = null; newGame('cpu', Number(start.dataset.side)); });
-  document.querySelector('[data-tut-quit]').addEventListener('click', () => { TUT = null; G = null; render(); });
 }
 
 render();
