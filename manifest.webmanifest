@@ -1,0 +1,19 @@
+{
+  "id": "./",
+  "name": "quixo — 5マスの盤をずらして5つ並べる対戦パズル",
+  "short_name": "quixo",
+  "description": "外周のキューブを押し込んで、縦横斜めに5つ揃えたら勝ち",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#241f1a",
+  "theme_color": "#241f1a",
+  "lang": "ja",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
