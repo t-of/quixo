@@ -267,29 +267,90 @@ const cubeMeshes = cellPos.map((p, i) => {
   return m;
 });
 
-// 押し込みアニメーション: 鎖に沿ってキューブを 1 つずつずらし、新しいキューブを外から入れる
+// 選んだキューブは浮かせてゆらす。勝った並びは波のように跳ねる。動いている間だけ毎フレーム描く
+const BASE_Y = 0.25;
+let liftCell = null;
+let winAt = 0;
+let raf = 0;
+function cubeTargetY(i, t) {
+  if (G && G.winLine && G.winLine.includes(i)) {
+    const k = G.winLine.indexOf(i);
+    return BASE_Y + 0.35 * Math.max(0, Math.sin((t - winAt) / 160 - k * 0.6));
+  }
+  if (i === liftCell) return 0.75 + 0.05 * Math.sin(t / 220);
+  return BASE_Y;
+}
+function loop() {
+  raf = 0;
+  if (!G) return;
+  const t = performance.now();
+  let moving = liftCell != null || !!G.winLine;
+  cubeMeshes.forEach((m, i) => {
+    const y = cubeTargetY(i, t);
+    m.position.y += (y - m.position.y) * (G.winLine ? 1 : 0.22);
+    m.rotation.z = i === liftCell ? 0.06 * Math.sin(t / 300) : 0;
+    if (Math.abs(y - m.position.y) > 0.002) moving = true;
+  });
+  draw();
+  if (moving) raf = requestAnimationFrame(loop);
+}
+function kick() { if (!raf) raf = requestAnimationFrame(loop); }
+
+const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const easeOutBack = (t) => 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 2);
+
+// 押し込みアニメーション:
+// 1) 取ったキューブを持ち上げ、ひっくり返しながら入れる端の外まで運ぶ（裏返った瞬間に自分の印に変わる）
+// 2) 鎖に沿って全部を 1 マスずつずらす（少し行き過ぎて戻る）
 function animatePush(chain, prevCells, mark, done) {
   const L = chain.length;
+  const pick = chain[L - 1];
+  const dir = cellPos[chain[0]].clone().sub(cellPos[chain[1]]).normalize(); // chain は常に長さ 2 以上
+  const entryFrom = cellPos[chain[0]].clone().addScaledVector(dir, 1);
+  entryFrom.y = BASE_Y;
+
+  const flyer = new THREE.Mesh(CUBE_GEO, CUBE_MATS[prevCells[pick]]);
+  const start = cubeMeshes[pick].position.clone();
+  flyer.position.copy(start);
+  scene.add(flyer);
+  cubeMeshes[pick].visible = false;
+  const travel = entryFrom.clone().sub(start); travel.y = 0;
+  const axis = new THREE.Vector3(0, 1, 0).cross(travel).normalize();
+
   const movers = [];
   for (let k = 1; k < L; k++) {
     movers.push({ mesh: new THREE.Mesh(CUBE_GEO, CUBE_MATS[prevCells[chain[k - 1]]]), from: cellPos[chain[k - 1]], to: cellPos[chain[k]] });
   }
-  const dir = cellPos[chain[0]].clone().sub(cellPos[chain[1]]).normalize(); // chain は常に長さ 2 以上
-  const entryFrom = cellPos[chain[0]].clone().addScaledVector(dir, 1);
-  movers.push({ mesh: new THREE.Mesh(CUBE_GEO, CUBE_MATS[mark]), from: entryFrom, to: cellPos[chain[0]] });
-  movers.forEach((mv) => { mv.mesh.position.copy(mv.from); mv.mesh.position.y = 0.25; scene.add(mv.mesh); });
-  chain.forEach((i) => { cubeMeshes[i].visible = false; });
 
-  const DUR = 260;
+  const FLY = 560, PUSH = 320;
   const t0 = performance.now();
+  let pushing = false;
   function step() {
-    const t = Math.min(1, (performance.now() - t0) / DUR);
-    const e = 1 - Math.pow(1 - t, 3); // ease out
-    movers.forEach((mv) => { mv.mesh.position.lerpVectors(mv.from, mv.to, e); mv.mesh.position.y = 0.25; });
+    const el = performance.now() - t0;
+    if (el < FLY) {
+      const t = el / FLY, e = easeInOut(t);
+      flyer.position.lerpVectors(start, entryFrom, e);
+      flyer.position.y = start.y + (BASE_Y - start.y) * e + 1.3 * Math.sin(Math.PI * e);
+      flyer.quaternion.setFromAxisAngle(axis, 2 * Math.PI * e);
+      if (e > 0.5) flyer.material = CUBE_MATS[mark];
+      draw();
+      requestAnimationFrame(step);
+      return;
+    }
+    if (!pushing) {
+      pushing = true;
+      flyer.quaternion.identity();
+      flyer.material = CUBE_MATS[mark];
+      movers.push({ mesh: flyer, from: entryFrom, to: cellPos[chain[0]] });
+      movers.forEach((mv) => { if (mv.mesh !== flyer) scene.add(mv.mesh); });
+      chain.forEach((i) => { cubeMeshes[i].visible = false; });
+    }
+    const t = Math.min(1, (el - FLY) / PUSH), e = easeOutBack(t);
+    movers.forEach((mv) => { mv.mesh.position.lerpVectors(mv.from, mv.to, e); mv.mesh.position.y = BASE_Y; });
     draw();
     if (t < 1) { requestAnimationFrame(step); return; }
     movers.forEach((mv) => scene.remove(mv.mesh));
-    chain.forEach((i) => { cubeMeshes[i].visible = true; });
+    chain.forEach((i) => { cubeMeshes[i].visible = true; cubeMeshes[i].position.y = BASE_Y; cubeMeshes[i].rotation.z = 0; });
     done();
   }
   requestAnimationFrame(step);
@@ -298,6 +359,9 @@ function animatePush(chain, prevCells, mark, done) {
 function syncScene() {
   const candidates = G.selected != null ? new Set(MOVES[G.selected].map((m) => m.chain[0])) : null;
   cubeMeshes.forEach((m, i) => { m.material = CUBE_MATS[G.cells[i]]; });
+  liftCell = animating ? null : G.selected;
+  if (G.winLine && !winAt) winAt = performance.now();
+  if (!G.winLine) winAt = 0;
   socketMeshes.forEach((s, i) => {
     let color = BORDER.includes(i) ? CELL_COLOR.border : CELL_COLOR.inner;
     if (G.winLine && G.winLine.includes(i)) color = CELL_COLOR.win;
@@ -306,6 +370,7 @@ function syncScene() {
     s.material.color.setHex(color);
   });
   draw();
+  kick();
 }
 
 function draw() { renderer.render(scene, camera); }
