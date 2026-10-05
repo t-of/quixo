@@ -248,7 +248,7 @@ function markCanvas(mark) {
   if (mark) {
     g.lineWidth = 26;
     g.lineCap = 'round';
-    g.strokeStyle = mark === 1 ? '#f3e6c8' : '#2a1c12'; // ○=明るい彫り、×=暗い彫り
+    g.strokeStyle = mark === 1 ? '#b3261e' : '#2a1c12'; // ○=朱、×=焦げ茶（どちらも明るい木目の上で目立つ色）
     if (mark === 1) { g.beginPath(); g.arc(128, 128, 72, 0, Math.PI * 2); g.stroke(); }
     else { g.beginPath(); g.moveTo(70, 70); g.lineTo(186, 186); g.moveTo(186, 70); g.lineTo(70, 186); g.stroke(); }
   }
