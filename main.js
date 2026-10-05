@@ -67,16 +67,34 @@ function applyMove(cells, chain, mark) {
 let G = null; // 対局中の状態。null ならタイトル（モード選択）画面
 let animating = false; // 押し込みアニメーション中は操作を受け付けない
 
+// タイトル画面に飾る、対局中の盤面（○ の番で、右上のキューブを持ち上げたところ）
+const DEMO = {
+  cells: [1, 0, 2, 0, 1, 0, 1, 2, 0, 0, 2, 0, 1, 0, 2, 0, 0, 2, 1, 0, 1, 2, 0, 0, 0],
+  selected: 4, winLine: null,
+};
+const view = () => G || DEMO;
+
+function goTitle() {
+  G = null;
+  animating = false;
+  animGen++; // 途中の押し込みアニメーションを止める
+  render();
+}
+
 function newGame(mode, cpuSide) {
   animating = false;
+  animGen++;
+  camera.position.set(0, 7.2, 6.7); // タイトルで回った視点を戻す
+  controls.update();
   G = { mode, cpuSide, cells: Array(25).fill(0), turn: 1, selected: null, winner: null, winLine: null, history: new Map() };
   render();
   maybeCpuTurn();
 }
 
-function isCpuTurn() { return G.mode === 'cpu' && G.turn === G.cpuSide; }
+function isCpuTurn() { return G.mode === 'watch' || (G.mode === 'cpu' && G.turn === G.cpuSide); }
 function playerLabel(p) {
   if (p === 'draw') return '引き分け';
+  if (G.mode === 'watch') return p === 1 ? 'CPU ○' : 'CPU ×';
   if (G.mode === 'cpu') return p === G.cpuSide ? 'CPU' : 'あなた';
   return p === 1 ? '1人目' : '2人目';
 }
@@ -88,7 +106,9 @@ function doMove(pick, mv) {
   render();
   const prevCells = G.cells.slice();
   const mark = G.turn;
+  const game = G;
   animatePush(mv.chain, prevCells, mark, () => {
+    if (G !== game) return;
     applyMove(G.cells, mv.chain, mark);
     animating = false;
     const other = mark === 1 ? 2 : 1;
@@ -140,7 +160,7 @@ function maybeCpuTurn() {
       doMove(e.data.pick, mv);
     }, wait);
   };
-  cpu.postMessage({ id, cells: G.cells, turn: G.turn, timeMs: 2500 });
+  cpu.postMessage({ id, cells: G.cells, turn: G.turn, timeMs: G.mode === 'watch' ? 1000 : 2500 });
 }
 
 // ---- 3D の盤（three.js）。ドラッグで回す、ピンチで寄る ----
@@ -160,6 +180,7 @@ controls.minDistance = 5;
 controls.maxDistance = 16;
 controls.maxPolarAngle = Math.PI / 2 - 0.05; // 盤の下にはもぐらない
 controls.target.set(0, 0.3, 0);
+controls.autoRotateSpeed = 0.8;
 controls.update();
 controls.addEventListener('change', draw);
 
@@ -273,8 +294,9 @@ let liftCell = null;
 let winAt = 0;
 let raf = 0;
 function cubeTargetY(i, t) {
-  if (G && G.winLine && G.winLine.includes(i)) {
-    const k = G.winLine.indexOf(i);
+  const V = view();
+  if (V.winLine && V.winLine.includes(i)) {
+    const k = V.winLine.indexOf(i);
     return BASE_Y + 0.35 * Math.max(0, Math.sin((t - winAt) / 160 - k * 0.6));
   }
   if (i === liftCell) return 0.75 + 0.05 * Math.sin(t / 220);
@@ -282,12 +304,13 @@ function cubeTargetY(i, t) {
 }
 function loop() {
   raf = 0;
-  if (!G) return;
+  const V = view();
   const t = performance.now();
-  let moving = liftCell != null || !!G.winLine;
+  if (!G) controls.update(); // タイトルではゆっくり回し続ける
+  let moving = !G || liftCell != null || !!V.winLine;
   cubeMeshes.forEach((m, i) => {
     const y = cubeTargetY(i, t);
-    m.position.y += (y - m.position.y) * (G.winLine ? 1 : 0.22);
+    m.position.y += (y - m.position.y) * (V.winLine ? 1 : 0.22);
     m.rotation.z = i === liftCell ? 0.06 * Math.sin(t / 300) : 0;
     if (Math.abs(y - m.position.y) > 0.002) moving = true;
   });
@@ -302,7 +325,10 @@ const easeOutBack = (t) => 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 
 // 押し込みアニメーション:
 // 1) 取ったキューブを持ち上げ、ひっくり返しながら入れる端の外まで運ぶ（裏返った瞬間に自分の印に変わる）
 // 2) 鎖に沿って全部を 1 マスずつずらす（少し行き過ぎて戻る）
+// 途中で animGen が変わったら（ホームに戻った・やり直した）、片付けて done を呼ばずに止める
+let animGen = 0;
 function animatePush(chain, prevCells, mark, done) {
+  const gen = animGen;
   const L = chain.length;
   const pick = chain[L - 1];
   const dir = cellPos[chain[0]].clone().sub(cellPos[chain[1]]).normalize(); // chain は常に長さ 2 以上
@@ -325,7 +351,13 @@ function animatePush(chain, prevCells, mark, done) {
   const FLY = 560, PUSH = 320;
   const t0 = performance.now();
   let pushing = false;
+  function cleanup() {
+    scene.remove(flyer);
+    movers.forEach((mv) => scene.remove(mv.mesh));
+    chain.forEach((i) => { cubeMeshes[i].visible = true; cubeMeshes[i].position.y = BASE_Y; cubeMeshes[i].rotation.z = 0; });
+  }
   function step() {
+    if (gen !== animGen) { cleanup(); draw(); return; }
     const el = performance.now() - t0;
     if (el < FLY) {
       const t = el / FLY, e = easeInOut(t);
@@ -349,23 +381,24 @@ function animatePush(chain, prevCells, mark, done) {
     movers.forEach((mv) => { mv.mesh.position.lerpVectors(mv.from, mv.to, e); mv.mesh.position.y = BASE_Y; });
     draw();
     if (t < 1) { requestAnimationFrame(step); return; }
-    movers.forEach((mv) => scene.remove(mv.mesh));
-    chain.forEach((i) => { cubeMeshes[i].visible = true; cubeMeshes[i].position.y = BASE_Y; cubeMeshes[i].rotation.z = 0; });
+    cleanup();
     done();
   }
   requestAnimationFrame(step);
 }
 
 function syncScene() {
-  const candidates = G.selected != null ? new Set(MOVES[G.selected].map((m) => m.chain[0])) : null;
-  cubeMeshes.forEach((m, i) => { m.material = CUBE_MATS[G.cells[i]]; });
-  liftCell = animating ? null : G.selected;
-  if (G.winLine && !winAt) winAt = performance.now();
-  if (!G.winLine) winAt = 0;
+  const V = view();
+  controls.autoRotate = !G;
+  const candidates = V.selected != null ? new Set(MOVES[V.selected].map((m) => m.chain[0])) : null;
+  cubeMeshes.forEach((m, i) => { m.material = CUBE_MATS[V.cells[i]]; });
+  liftCell = animating ? null : V.selected;
+  if (V.winLine && !winAt) winAt = performance.now();
+  if (!V.winLine) winAt = 0;
   socketMeshes.forEach((s, i) => {
     let color = BORDER.includes(i) ? CELL_COLOR.border : CELL_COLOR.inner;
-    if (G.winLine && G.winLine.includes(i)) color = CELL_COLOR.win;
-    else if (G.selected === i) color = CELL_COLOR.selected;
+    if (V.winLine && V.winLine.includes(i)) color = CELL_COLOR.win;
+    else if (V.selected === i) color = CELL_COLOR.selected;
     else if (candidates && candidates.has(i)) color = CELL_COLOR.candidate;
     s.material.color.setHex(color);
   });
@@ -402,11 +435,10 @@ canvas.addEventListener('pointerup', (e) => {
 // ---- 画面 ----
 function render() {
   const stage = document.getElementById('stage');
-  if (!G) { stage.innerHTML = titleHTML(); bindTitle(); return; }
-  stage.innerHTML = gameHTML();
+  stage.innerHTML = G ? gameHTML() : titleHTML();
   document.getElementById('board3d').appendChild(canvas);
   syncScene();
-  bindGame();
+  if (G) bindGame(); else bindTitle();
 }
 
 // ---- ルール欄の図（インライン SVG。ゲーム本体と同じ色: ○=朱 #b3261e、×=焦げ茶 #2a1c12） ----
@@ -477,9 +509,11 @@ function titleHTML() {
     <div class="title">
       <h2>クイキシオ</h2>
       <p class="hint">外周のキューブを押し込んで、縦横斜めに自分の印を5つ並べたら勝ち</p>
+      <div class="board3d board3d--title" id="board3d"></div>
       <button class="pill pill--big" data-start="cpu" data-side="2">CPU と対戦（先手）</button>
       <button class="pill pill--big" data-start="cpu" data-side="1">CPU と対戦（後手）</button>
       <button class="pill pill--big" data-start="2p">2人で対戦（1台で交互）</button>
+      <button class="pill pill--big" data-start="watch">CPU 同士の対戦を見る</button>
       <details class="rules">
         <summary>ルール</summary>
         <ol>
@@ -508,14 +542,16 @@ function gameHTML() {
   const again = G.winner ? `
     <div class="result">
       <button class="pill pill--big" data-again>もう一度</button>
-      <button class="pill" data-title>モードを選び直す</button>
     </div>` : '';
 
   return `
     <div class="game">
-      <p class="status">${status}</p>
+      <div class="game__top">
+        <button class="pill" data-title>← ホーム</button>
+        <p class="status">${status}</p>
+      </div>
       <div class="board3d" id="board3d"></div>
-      <p class="hint">外周をタップ → 押し込める端をタップ・ドラッグで回す・ピンチで寄る</p>
+      <p class="hint">${G.mode === 'watch' ? 'ドラッグで回す・ピンチで寄る' : '外周をタップ → 押し込める端をタップ・ドラッグで回す・ピンチで寄る'}</p>
       ${again}
     </div>`;
 }
@@ -523,8 +559,7 @@ function gameHTML() {
 function bindGame() {
   const again = document.querySelector('[data-again]');
   if (again) again.addEventListener('click', () => newGame(G.mode, G.cpuSide));
-  const title = document.querySelector('[data-title]');
-  if (title) title.addEventListener('click', () => { G = null; render(); });
+  document.querySelector('[data-title]').addEventListener('click', goTitle);
 }
 
 render();

@@ -65,6 +65,10 @@ button { font: inherit; color: inherit; }
 .status { margin: 0; font-size: 14px; min-height: 1.4em; text-align: center; }
 
 .board3d { width: 100%; flex: 1; min-height: 200px; }
+/* タイトルでは対局と同じ盤を飾りとして回す */
+.board3d--title { flex: none; height: clamp(150px, 30dvh, 260px); min-height: 0; }
+.game__top { display: flex; align-items: center; gap: 8px; width: 100%; }
+.game__top .status { flex: 1; }
 .board3d__canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
 
 .result { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: 4px; }
